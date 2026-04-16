@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users } from "../drizzle/schema";
+import { InsertUser, users, profiles, questionnaireAnswers, colorPalettes, userPreferences } from "../drizzle/schema";
 import { ENV } from './_core/env';
 
 let _db: ReturnType<typeof drizzle> | null = null;
@@ -89,4 +89,96 @@ export async function getUserByOpenId(openId: string) {
   return result.length > 0 ? result[0] : undefined;
 }
 
-// TODO: add feature queries here as your schema grows.
+// Profile queries
+export async function createProfile(userId: number, name: string, emoji: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const result = await db.insert(profiles).values({ userId, name, emoji });
+  return result;
+}
+
+export async function getUserProfiles(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(profiles).where(eq(profiles.userId, userId));
+}
+
+export async function updateProfile(profileId: number, name: string, emoji: string) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.update(profiles).set({ name, emoji }).where(eq(profiles.id, profileId));
+}
+
+export async function deleteProfile(profileId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.delete(profiles).where(eq(profiles.id, profileId));
+}
+
+// Questionnaire answers queries
+export async function saveQuestionnaireAnswers(profileId: number, answers: Record<string, any>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await db.select().from(questionnaireAnswers).where(eq(questionnaireAnswers.profileId, profileId));
+  
+  if (existing.length > 0) {
+    return await db.update(questionnaireAnswers).set({ answers }).where(eq(questionnaireAnswers.profileId, profileId));
+  }
+  return await db.insert(questionnaireAnswers).values({ profileId, answers });
+}
+
+export async function getQuestionnaireAnswers(profileId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(questionnaireAnswers).where(eq(questionnaireAnswers.profileId, profileId));
+  return result.length > 0 ? result[0] : null;
+}
+
+// Color palette queries
+export async function createColorPalette(userId: number, name: string, colors: Record<string, string>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.insert(colorPalettes).values({ userId, name, colors });
+}
+
+export async function getUserColorPalettes(userId: number) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db.select().from(colorPalettes).where(eq(colorPalettes.userId, userId));
+}
+
+export async function updateColorPalette(paletteId: number, name: string, colors: Record<string, string>) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.update(colorPalettes).set({ name, colors }).where(eq(colorPalettes.id, paletteId));
+}
+
+export async function deleteColorPalette(paletteId: number) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.delete(colorPalettes).where(eq(colorPalettes.id, paletteId));
+}
+
+// User preferences queries
+export async function getUserPreferences(userId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(userPreferences).where(eq(userPreferences.userId, userId));
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function updateUserPreferences(userId: number, selectedPaletteId?: number | null, theme?: "light" | "dark") {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  const existing = await getUserPreferences(userId);
+  
+  if (existing) {
+    const updates: any = {};
+    if (selectedPaletteId !== undefined) updates.selectedPaletteId = selectedPaletteId;
+    if (theme !== undefined) updates.theme = theme;
+    return await db.update(userPreferences).set(updates).where(eq(userPreferences.userId, userId));
+  }
+  return await db.insert(userPreferences).values({ userId, selectedPaletteId: selectedPaletteId || null, theme: theme || "dark" });
+}
+
+
