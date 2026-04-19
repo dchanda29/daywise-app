@@ -73,6 +73,12 @@ export default function Dashboard() {
   const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
   const dayStr = now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 
+  // Load user preferences on component mount
+  const preferencesQuery = trpc.preferences.get.useQuery();
+  
+  // Load existing palettes
+  const palettesQuery = trpc.palettes.list.useQuery();
+
   const generateAdviceMutation = trpc.advice.generate.useMutation({
     onSuccess: (data, variables) => {
       const catId = variables.categories[0];
@@ -91,11 +97,31 @@ export default function Dashboard() {
       toast.success("Palette created!");
       setPaletteName("");
       setShowPaletteDialog(false);
+      // Refetch palettes
+      palettesQuery.refetch();
     },
     onError: (error) => {
       toast.error(error.message || "Failed to create palette");
     },
   });
+
+  const updatePreferencesMutation = trpc.preferences.update.useMutation({
+    onSuccess: () => {
+      toast.success("Palette applied!");
+      preferencesQuery.refetch();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to apply palette");
+    },
+  });
+
+  // Apply selected palette colors as CSS variables
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--color-primary", paletteColors.primary);
+    root.style.setProperty("--color-secondary", paletteColors.secondary);
+    root.style.setProperty("--color-accent", paletteColors.accent);
+  }, [paletteColors]);
 
   const toggleCategory = (id: string) => {
     setSelected((prev) => {
@@ -155,6 +181,12 @@ export default function Dashboard() {
   const handleApplyPreset = (preset: typeof PRESET_PALETTES[0]) => {
     setPaletteName(preset.name);
     setPaletteColors(preset.colors);
+  };
+
+  const handleApplyPalette = (paletteId: number) => {
+    updatePreferencesMutation.mutate({
+      selectedPaletteId: paletteId,
+    });
   };
 
   const handleCreatePalette = () => {
@@ -245,6 +277,27 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
+
+                {palettesQuery.data && palettesQuery.data.length > 0 && (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Your Saved Palettes</p>
+                    <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+                      {palettesQuery.data.map((palette) => (
+                        <button
+                          key={palette.id}
+                          onClick={() => handleApplyPalette(palette.id)}
+                          className={`p-3 rounded border transition-all text-center text-xs font-medium ${
+                            preferencesQuery.data?.selectedPaletteId === palette.id
+                              ? "border-accent bg-accent/10"
+                              : "border-border hover:border-accent"
+                          }`}
+                        >
+                          {palette.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <Button onClick={handleCreatePalette} disabled={createPaletteMutation.isPending} className="w-full">
                   Save Palette
