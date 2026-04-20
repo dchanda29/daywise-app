@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Loader2, RotateCcw, Settings, ArrowLeft } from "lucide-react";
+import { Loader2, RotateCcw, Settings, ArrowLeft, ThumbsUp, ThumbsDown } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 
@@ -114,6 +114,11 @@ export default function Dashboard() {
       toast.error(error.message || "Failed to apply palette");
     },
   });
+  const feedbackMutation = trpc.advice.feedback.useMutation({
+    onError: (error) => {
+      toast.error(error.message || "Failed to save feedback");
+    },
+  });
 
   // Apply selected palette colors as CSS variables
   useEffect(() => {
@@ -217,6 +222,9 @@ export default function Dashboard() {
             <Button onClick={() => navigate("/profiles", { replace: true })} variant="ghost" size="sm">
               <ArrowLeft className="w-4 h-4 mr-2" />
               Back
+            </Button>
+            <Button onClick={() => navigate(`/questionnaire/${profileId}`, { replace: true })} variant="ghost" size="sm">
+              Edit Preferences
             </Button>
             <h1 className="text-2xl font-bold text-accent">DayWise</h1>
           </div>
@@ -399,6 +407,38 @@ export default function Dashboard() {
                           <RotateCcw className="w-4 h-4 mr-2" />
                           New suggestion
                         </Button>
+                        <div className="flex gap-2 mt-2">
+                          <Button
+                            onClick={() =>
+                              feedbackMutation.mutate({
+                                profileId,
+                                category: cat.id,
+                                recommendation: r.text,
+                                rating: "like",
+                              })
+                            }
+                            variant="ghost"
+                            size="sm"
+                          >
+                            <ThumbsUp className="w-4 h-4 mr-1" />
+                            Helpful
+                          </Button>
+                          <Button
+                            onClick={() =>
+                              feedbackMutation.mutate({
+                                profileId,
+                                category: cat.id,
+                                recommendation: r.text,
+                                rating: "dislike",
+                              })
+                            }
+                            variant="ghost"
+                            size="sm"
+                          >
+                            <ThumbsDown className="w-4 h-4 mr-1" />
+                            Not helpful
+                          </Button>
+                        </div>
                       </>
                     )}
                   </CardContent>

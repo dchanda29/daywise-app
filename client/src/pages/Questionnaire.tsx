@@ -31,10 +31,21 @@ export default function Questionnaire() {
 
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const existingAnswersQuery = trpc.questionnaire.get.useQuery(
+    { profileId },
+    { enabled: Number.isFinite(profileId) && profileId > 0 }
+  );
+
+  useEffect(() => {
+    const existing = existingAnswersQuery.data?.answers as Record<string, any> | undefined;
+    if (existing && Object.keys(existing).length > 0) {
+      setAnswers(existing);
+    }
+  }, [existingAnswersQuery.data]);
 
   const saveAnswersMutation = trpc.questionnaire.save.useMutation({
     onSuccess: () => {
-      toast.success("Questionnaire completed!");
+      toast.success("Preferences saved!");
       navigate(`/dashboard/${profileId}`, { replace: true });
     },
     onError: (error) => {
@@ -78,6 +89,11 @@ export default function Questionnaire() {
             Question {step + 1} of {QUESTIONS.length}
             {q.type === "multi" && " · Pick all that apply"}
           </div>
+          {existingAnswersQuery.data?.answers && (
+            <div className="text-xs text-muted-foreground mt-2">
+              Editing existing preferences
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-6">
           <div>

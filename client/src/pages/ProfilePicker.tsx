@@ -8,12 +8,14 @@ import { Plus, Trash2, LogOut } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
+import { MAX_PROFILES_PER_USER } from "@shared/const";
 
 const EMOJIS = ["🙂", "😎", "🧑", "👩", "🧔", "🧕", "👶", "🧓", "🐱", "🐶", "🦊", "🌟", "🔥", "🌙", "🎯", "🚀"];
 
 export default function ProfilePicker() {
   const [, navigate] = useLocation();
   const { user, logout } = useAuth();
+  const utils = trpc.useUtils();
   const [newName, setNewName] = useState("");
   const [newEmoji, setNewEmoji] = useState("🙂");
   const [open, setOpen] = useState(false);
@@ -51,7 +53,15 @@ export default function ProfilePicker() {
   };
 
   const handleSelectProfile = (profileId: number) => {
-    navigate(`/questionnaire/${profileId}`, { replace: true });
+    utils.questionnaire.get
+      .fetch({ profileId })
+      .then((existing) => {
+        const hasAnswers = !!existing?.answers && Object.keys((existing.answers as Record<string, unknown>) || {}).length > 0;
+        navigate(hasAnswers ? `/dashboard/${profileId}` : `/questionnaire/${profileId}`, { replace: true });
+      })
+      .catch(() => {
+        navigate(`/questionnaire/${profileId}`, { replace: true });
+      });
   };
 
   const handleDeleteProfile = (profileId: number) => {
@@ -59,6 +69,7 @@ export default function ProfilePicker() {
       deleteProfileMutation.mutate({ profileId });
     }
   };
+  const canAddMoreProfiles = profiles.length < MAX_PROFILES_PER_USER;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background to-secondary p-4">
@@ -101,12 +112,12 @@ export default function ProfilePicker() {
                 </div>
               ))}
 
-              <Dialog open={open} onOpenChange={setOpen}>
+              <Dialog open={open && canAddMoreProfiles} onOpenChange={setOpen}>
                 <DialogTrigger asChild>
                   <Card className="hover:border-accent hover:shadow-lg transition-all cursor-pointer">
                     <CardContent className="p-6 text-center flex flex-col items-center justify-center h-full">
                       <Plus className="w-8 h-8 text-muted-foreground mb-2" />
-                      <p className="font-semibold text-sm">Add Profile</p>
+                      <p className="font-semibold text-sm">{canAddMoreProfiles ? "Add Profile" : "Profile limit reached"}</p>
                     </CardContent>
                   </Card>
                 </DialogTrigger>
@@ -146,7 +157,7 @@ export default function ProfilePicker() {
                     <div className="flex gap-2 pt-4">
                       <Button
                         onClick={handleCreateProfile}
-                        disabled={createProfileMutation.isPending}
+                        disabled={createProfileMutation.isPending || !canAddMoreProfiles}
                         className="flex-1"
                       >
                         Create Profile
@@ -163,6 +174,9 @@ export default function ProfilePicker() {
                 </DialogContent>
               </Dialog>
             </div>
+            <p className="text-sm text-muted-foreground mb-4">
+              {profiles.length}/{MAX_PROFILES_PER_USER} profiles used.
+            </p>
 
             <Button
               onClick={() => logout()}

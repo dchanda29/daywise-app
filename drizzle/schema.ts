@@ -86,3 +86,20 @@ export const userPreferences = mysqlTable("user_preferences", {
 
 export type UserPreference = typeof userPreferences.$inferSelect;
 export type InsertUserPreference = typeof userPreferences.$inferInsert;
+
+/**
+ * Advice feedback table - stores user reactions so recommendations improve over time.
+ */
+export const adviceFeedback = mysqlTable("advice_feedback", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  profileId: int("profileId").notNull(),
+  category: varchar("category", { length: 64 }).notNull(),
+  recommendation: text("recommendation").notNull(),
+  rating: mysqlEnum("rating", ["like", "dislike"]).notNull(),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
+export type AdviceFeedback = typeof adviceFeedback.$inferSelect;
+export type InsertAdviceFeedback = typeof adviceFeedback.$inferInsert;

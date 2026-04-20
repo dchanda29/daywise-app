@@ -4,6 +4,10 @@ import * as db from "../db";
 import { getSessionCookieOptions } from "./cookies";
 import { sdk } from "./sdk";
 
+function isGoogleLoginMethod(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.toLowerCase().includes("google");
+}
+
 function getQueryParam(req: Request, key: string): string | undefined {
   const value = req.query[key];
   return typeof value === "string" ? value : undefined;
@@ -27,12 +31,17 @@ export function registerOAuthRoutes(app: Express) {
         res.status(400).json({ error: "openId missing from user info" });
         return;
       }
+      const loginMethod = userInfo.loginMethod ?? userInfo.platform ?? null;
+      if (!isGoogleLoginMethod(loginMethod)) {
+        res.status(403).json({ error: "Only Google login is allowed for this app." });
+        return;
+      }
 
       await db.upsertUser({
         openId: userInfo.openId,
         name: userInfo.name || null,
         email: userInfo.email ?? null,
-        loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+        loginMethod,
         lastSignedIn: new Date(),
       });
 

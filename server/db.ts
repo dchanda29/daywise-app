@@ -1,7 +1,17 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/mysql2";
-import { InsertUser, users, profiles, questionnaireAnswers, colorPalettes, userPreferences } from "../drizzle/schema";
-import { ENV } from './_core/env';
+import {
+  InsertUser,
+  users,
+  profiles,
+  questionnaireAnswers,
+  colorPalettes,
+  userPreferences,
+  adviceFeedback,
+} from "../drizzle/schema";
+import { ENV } from "./_core/env";
+
+export const MAX_PROFILES_PER_USER = 4;
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -93,6 +103,10 @@ export async function getUserByOpenId(openId: string) {
 export async function createProfile(userId: number, name: string, emoji: string) {
   const db = await getDb();
   if (!db) throw new Error("Database not available");
+  const existingProfiles = await getUserProfiles(userId);
+  if (existingProfiles.length >= MAX_PROFILES_PER_USER) {
+    throw new Error(`You can create up to ${MAX_PROFILES_PER_USER} profiles.`);
+  }
   const result = await db.insert(profiles).values({ userId, name, emoji });
   return result;
 }
@@ -132,6 +146,55 @@ export async function getQuestionnaireAnswers(profileId: number) {
   if (!db) return null;
   const result = await db.select().from(questionnaireAnswers).where(eq(questionnaireAnswers.profileId, profileId));
   return result.length > 0 ? result[0] : null;
+}
+
+export async function getProfileById(profileId: number) {
+  const db = await getDb();
+  if (!db) return null;
+  const result = await db.select().from(profiles).where(eq(profiles.id, profileId)).limit(1);
+  return result.length > 0 ? result[0] : null;
+}
+
+export async function userOwnsProfile(userId: number, profileId: number): Promise<boolean> {
+  const db = await getDb();
+  if (!db) return false;
+  const result = await db
+    .select({ id: profiles.id })
+    .from(profiles)
+    .where(and(eq(profiles.id, profileId), eq(profiles.userId, userId)))
+    .limit(1);
+  return result.length > 0;
+}
+
+export async function createAdviceFeedback(
+  userId: number,
+  profileId: number,
+  category: string,
+  recommendation: string,
+  rating: "like" | "dislike",
+  note?: string
+) {
+  const db = await getDb();
+  if (!db) throw new Error("Database not available");
+  return await db.insert(adviceFeedback).values({
+    userId,
+    profileId,
+    category,
+    recommendation,
+    rating,
+    note: note ?? null,
+  });
+}
+
+export async function getRecentAdviceFeedback(profileId: number, limit: number = 8) {
+  const db = await getDb();
+  if (!db) return [];
+  return await db
+    .select()
+    .from(adviceFeedback)
+    .where(eq(adviceFeedback.profileId, profileId))
+    .orderBy(desc(adviceFeedback.createdAt))
+    .limit(limit);
 }
 
 // Color palette queries

@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getLoginUrl } from "@/const";
 
@@ -24,27 +23,27 @@ export default function Auth() {
 
             <TabsContent value="signin" className="space-y-4">
               <p className="text-sm text-muted-foreground mb-4">
-                Sign in with your Manus account to get started with personalized daily advice.
+                Sign in with Google to continue. If this is your first time, your account is created automatically.
               </p>
               <Button
                 onClick={() => (window.location.href = getLoginUrl())}
                 className="w-full"
                 size="lg"
               >
-                Sign In with Manus →
+                Continue with Google →
               </Button>
             </TabsContent>
 
             <TabsContent value="signup" className="space-y-4">
               <p className="text-sm text-muted-foreground mb-4">
-                Create a new account to start using DayWise. You'll need a Manus account to sign up.
+                Create your account with Google in one click. Existing users are signed in directly.
               </p>
               <Button
                 onClick={() => (window.location.href = getLoginUrl())}
                 className="w-full"
                 size="lg"
               >
-                Create Account with Manus →
+                Create Account with Google →
               </Button>
             </TabsContent>
           </Tabs>

@@ -113,6 +113,10 @@ class SDKServer {
     return first ? first.toLowerCase() : null;
   }
 
+  private isGoogleLogin(value: string | null | undefined): boolean {
+    return typeof value === "string" && value.toLowerCase().includes("google");
+  }
+
   /**
    * Exchange OAuth authorization code for access token
    * @example
@@ -274,11 +278,15 @@ class SDKServer {
     if (!user) {
       try {
         const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
+        const loginMethod = userInfo.loginMethod ?? userInfo.platform ?? null;
+        if (!this.isGoogleLogin(loginMethod)) {
+          throw ForbiddenError("Only Google login is allowed");
+        }
         await db.upsertUser({
           openId: userInfo.openId,
           name: userInfo.name || null,
           email: userInfo.email ?? null,
-          loginMethod: userInfo.loginMethod ?? userInfo.platform ?? null,
+          loginMethod,
           lastSignedIn: signedInAt,
         });
         user = await db.getUserByOpenId(userInfo.openId);

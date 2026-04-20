@@ -209,15 +209,25 @@ const normalizeToolChoice = (
   return toolChoice;
 };
 
-const resolveApiUrl = () =>
-  ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
-    ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
-    : "https://forge.manus.im/v1/chat/completions";
+type LlmProvider = "gemini" | "forge" | "openrouter" | "groq" | "none";
 
-const assertApiKey = () => {
-  if (!ENV.forgeApiKey) {
-    throw new Error("OPENAI_API_KEY is not configured");
+const openAiLikeUrlByProvider = (provider: LlmProvider): string => {
+  if (provider === "forge") {
+    return ENV.forgeApiUrl && ENV.forgeApiUrl.trim().length > 0
+      ? `${ENV.forgeApiUrl.replace(/\/$/, "")}/v1/chat/completions`
+      : "https://forge.manus.im/v1/chat/completions";
   }
+  if (provider === "openrouter") return ENV.openRouterApiUrl;
+  if (provider === "groq") return ENV.groqApiUrl;
+  throw new Error(`Provider ${provider} does not use OpenAI-compatible URL`);
+};
+
+const apiKeyByProvider = (provider: LlmProvider): string => {
+  if (provider === "gemini") return ENV.geminiApiKey;
+  if (provider === "forge") return ENV.forgeApiKey;
+  if (provider === "openrouter") return ENV.openRouterApiKey;
+  if (provider === "groq") return ENV.groqApiKey;
+  return "";
 };
 
 const normalizeResponseFormat = ({
@@ -266,8 +276,6 @@ const normalizeResponseFormat = ({
 };
 
 export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
-  assertApiKey();
-
   const {
     messages,
     tools,
@@ -279,8 +287,79 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     response_format,
   } = params;
 
+  const normalizedResponseFormat = normalizeResponseFormat({
+    responseFormat,
+    response_format,
+    outputSchema,
+    output_schema,
+  });
+
+  const providers: Array<{ provider: LlmProvider; model: string }> = [
+    {
+      provider: ENV.llmProviderPrimary as LlmProvider,
+      model: ENV.llmModelPrimary,
+    },
+    {
+      provider: ENV.llmProviderFallback1 as LlmProvider,
+      model: ENV.llmModelFallback1,
+    },
+    {
+      provider: ENV.llmProviderFallback2 as LlmProvider,
+      model: ENV.llmModelFallback2,
+    },
+  ].filter(item => item.provider !== "none" && item.model && item.model.trim().length > 0);
+
+  let lastError: unknown = null;
+  for (const entry of providers) {
+    try {
+      if (!apiKeyByProvider(entry.provider)) {
+        continue;
+      }
+      if (entry.provider === "gemini") {
+        return await invokeGemini({
+          model: entry.model,
+          messages,
+          responseFormat: normalizedResponseFormat,
+          timeoutMs: ENV.llmFailoverTimeoutMs,
+        });
+      }
+      return await invokeOpenAiLike({
+        provider: entry.provider,
+        model: entry.model,
+        messages,
+        tools,
+        toolChoice: toolChoice || tool_choice,
+        responseFormat: normalizedResponseFormat,
+        timeoutMs: ENV.llmFailoverTimeoutMs,
+      });
+    } catch (error) {
+      lastError = error;
+      console.warn(`[LLM] Provider ${entry.provider} failed`, error);
+    }
+  }
+
+  throw new Error(`All configured LLM providers failed. Last error: ${String(lastError)}`);
+}
+
+async function invokeOpenAiLike({
+  provider,
+  model,
+  messages,
+  tools,
+  toolChoice,
+  responseFormat,
+  timeoutMs,
+}: {
+  provider: LlmProvider;
+  model: string;
+  messages: Message[];
+  tools?: Tool[];
+  toolChoice?: ToolChoice;
+  responseFormat?: ResponseFormat;
+  timeoutMs: number;
+}): Promise<InvokeResult> {
   const payload: Record<string, unknown> = {
-    model: "gpt-4o",
+    model,
     messages: messages.map(normalizeMessage),
   };
 
@@ -289,7 +368,7 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   const normalizedToolChoice = normalizeToolChoice(
-    toolChoice || tool_choice,
+    toolChoice,
     tools
   );
   if (normalizedToolChoice) {
@@ -298,25 +377,22 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
 
   payload.max_tokens = 4096;
 
-  const normalizedResponseFormat = normalizeResponseFormat({
-    responseFormat,
-    response_format,
-    outputSchema,
-    output_schema,
-  });
-
-  if (normalizedResponseFormat) {
-    payload.response_format = normalizedResponseFormat;
+  if (responseFormat) {
+    payload.response_format = responseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const response = await fetch(openAiLikeUrlByProvider(provider), {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
+      authorization: `Bearer ${apiKeyByProvider(provider)}`,
     },
     body: JSON.stringify(payload),
+    signal: controller.signal,
   });
+  clearTimeout(timer);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -326,4 +402,73 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
   }
 
   return (await response.json()) as InvokeResult;
+}
+
+async function invokeGemini({
+  model,
+  messages,
+  responseFormat,
+  timeoutMs,
+}: {
+  model: string;
+  messages: Message[];
+  responseFormat?: ResponseFormat;
+  timeoutMs: number;
+}): Promise<InvokeResult> {
+  if (!ENV.geminiApiKey) {
+    throw new Error("GEMINI_API_KEY is not configured");
+  }
+
+  const parts = messages.map(msg => {
+    const content = ensureArray(msg.content)
+      .map(part => (typeof part === "string" ? part : part.type === "text" ? part.text : JSON.stringify(part)))
+      .join("\n");
+    return {
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: [{ text: `${msg.role.toUpperCase()}:\n${content}` }],
+    };
+  });
+
+  const generationConfig: Record<string, unknown> = {};
+  if (responseFormat?.type === "json_object" || responseFormat?.type === "json_schema") {
+    generationConfig.responseMimeType = "application/json";
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${ENV.geminiApiKey}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: parts,
+        generationConfig,
+      }),
+      signal: controller.signal,
+    }
+  );
+  clearTimeout(timer);
+
+  if (!response.ok) {
+    throw new Error(`Gemini invoke failed: ${response.status} ${response.statusText} - ${await response.text()}`);
+  }
+
+  const data = (await response.json()) as any;
+  const text = data?.candidates?.[0]?.content?.parts?.map((p: any) => p?.text ?? "").join("\n") ?? "";
+  return {
+    id: data?.responseId ?? "gemini-response",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [
+      {
+        index: 0,
+        message: {
+          role: "assistant",
+          content: text,
+        },
+        finish_reason: data?.candidates?.[0]?.finishReason ?? "stop",
+      },
+    ],
+  };
 }

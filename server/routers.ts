@@ -5,19 +5,23 @@ import { publicProcedure, router, protectedProcedure } from "./_core/trpc";
 import { z } from "zod";
 import {
   createProfile,
+  createAdviceFeedback,
   getUserProfiles,
   updateProfile,
   deleteProfile,
   saveQuestionnaireAnswers,
   getQuestionnaireAnswers,
+  getRecentAdviceFeedback,
   createColorPalette,
   getUserColorPalettes,
   updateColorPalette,
   deleteColorPalette,
   getUserPreferences,
   updateUserPreferences,
+  userOwnsProfile,
 } from "./db";
 import { invokeLLM } from "./_core/llm";
+import { TRPCError } from "@trpc/server";
 
 export const appRouter = router({
   system: systemRouter,
@@ -41,18 +45,34 @@ export const appRouter = router({
     create: protectedProcedure
       .input(z.object({ name: z.string().min(1), emoji: z.string() }))
       .mutation(async ({ ctx, input }) => {
-        return await createProfile(ctx.user.id, input.name, input.emoji);
+        try {
+          return await createProfile(ctx.user.id, input.name, input.emoji);
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("up to")) {
+            throw new TRPCError({
+              code: "BAD_REQUEST",
+              message: error.message,
+            });
+          }
+          throw error;
+        }
       }),
 
     update: protectedProcedure
       .input(z.object({ profileId: z.number(), name: z.string().min(1), emoji: z.string() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
         return await updateProfile(input.profileId, input.name, input.emoji);
       }),
 
     delete: protectedProcedure
       .input(z.object({ profileId: z.number() }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
         return await deleteProfile(input.profileId);
       }),
   }),
@@ -61,13 +81,19 @@ export const appRouter = router({
   questionnaire: router({
     save: protectedProcedure
       .input(z.object({ profileId: z.number(), answers: z.record(z.string(), z.any()) }))
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
         return await saveQuestionnaireAnswers(input.profileId, input.answers);
       }),
 
     get: protectedProcedure
       .input(z.object({ profileId: z.number() }))
-      .query(async ({ input }) => {
+      .query(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
         return await getQuestionnaireAnswers(input.profileId);
       }),
   }),
@@ -82,7 +108,10 @@ export const appRouter = router({
           prompt: z.string(),
         })
       )
-      .mutation(async ({ input }) => {
+      .mutation(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
         const answers = await getQuestionnaireAnswers(input.profileId);
         if (!answers) {
           throw new Error("Profile questionnaire not completed");
@@ -92,23 +121,52 @@ export const appRouter = router({
           .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
           .join("\n");
 
+        const feedback = await getRecentAdviceFeedback(input.profileId, 8);
+        const feedbackSummary = feedback
+          .map((item) => {
+            const notePart = item.note ? ` (${item.note})` : "";
+            return `${item.category}: ${item.rating}${notePart} -> ${item.recommendation}`;
+          })
+          .join("\n");
+
         try {
           const response = await invokeLLM({
             messages: [
               {
                 role: "system",
-                content: `You are a warm, witty personal AI life advisor. You know this person well:\n${profileSummary}\n\nGive specific, actionable advice tailored to their exact profile. Be concise (3–5 sentences). Be conversational and encouraging. Start directly with the advice — no preamble.`,
+                content: `You are a warm, practical personal AI life advisor.\nUser profile:\n${profileSummary}\n\nPast feedback from this user:\n${feedbackSummary || "No prior feedback yet."}\n\nReturn concise, personalized guidance as JSON with this shape:\n{"primary":"string","alternatives":["string","string"],"reason":"string"}.\nRules: keep advice actionable, realistic, and aligned with the user's preferences/budget/lifestyle.`,
               },
               {
                 role: "user",
                 content: input.prompt,
               },
             ],
+            responseFormat: { type: "json_object" },
           });
 
           const text = response.choices?.[0]?.message?.content;
-          if (typeof text === "string") {
-            return { text, mock: false };
+          if (typeof text === "string" && text.trim().length > 0) {
+            try {
+              const parsed = JSON.parse(text) as {
+                primary?: string;
+                alternatives?: string[];
+                reason?: string;
+              };
+              const alternatives = Array.isArray(parsed.alternatives) ? parsed.alternatives.slice(0, 2) : [];
+              const finalText = [
+                parsed.primary ? `Primary: ${parsed.primary}` : "",
+                alternatives.length > 0 ? `Alternatives:\n- ${alternatives.join("\n- ")}` : "",
+                parsed.reason ? `Why this fits you: ${parsed.reason}` : "",
+              ]
+                .filter(Boolean)
+                .join("\n\n");
+              return {
+                text: finalText || text,
+                mock: false,
+              };
+            } catch {
+              return { text, mock: false };
+            }
           }
           throw new Error("Invalid response format");
         } catch (error) {
@@ -119,6 +177,30 @@ export const appRouter = router({
             mock: true,
           };
         }
+      }),
+    feedback: protectedProcedure
+      .input(
+        z.object({
+          profileId: z.number(),
+          category: z.string().min(1),
+          recommendation: z.string().min(1),
+          rating: z.enum(["like", "dislike"]),
+          note: z.string().optional(),
+        })
+      )
+      .mutation(async ({ ctx, input }) => {
+        if (!(await userOwnsProfile(ctx.user.id, input.profileId))) {
+          throw new TRPCError({ code: "FORBIDDEN", message: "You do not have access to this profile." });
+        }
+        await createAdviceFeedback(
+          ctx.user.id,
+          input.profileId,
+          input.category,
+          input.recommendation,
+          input.rating,
+          input.note
+        );
+        return { success: true } as const;
       }),
   }),
 
