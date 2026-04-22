@@ -9,6 +9,7 @@ import Auth from "./pages/Auth";
 import ProfilePicker from "./pages/ProfilePicker";
 import Questionnaire from "./pages/Questionnaire";
 import Dashboard from "./pages/Dashboard";
+import LinkedInGuide from "./pages/LinkedInGuide";
 import { useAuth } from "./_core/hooks/useAuth";
 import { Loader2 } from "lucide-react";
 
@@ -33,6 +34,7 @@ function Router() {
       <Route path={"/profiles"} component={ProfilePicker} />
       <Route path={"/questionnaire/:profileId"} component={Questionnaire} />
       <Route path={"/dashboard/:profileId"} component={Dashboard} />
+      <Route path={"/linkedin-guide"} component={LinkedInGuide} />
       <Route path={"/404"} component={NotFound} />
       {/* Final fallback route */}
       <Route component={NotFound} />

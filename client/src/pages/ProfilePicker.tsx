@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Trash2, LogOut } from "lucide-react";
+import { Plus, Trash2, LogOut, BookOpen } from "lucide-react";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
 import { toast } from "sonner";
@@ -178,14 +178,24 @@ export default function ProfilePicker() {
               {profiles.length}/{MAX_PROFILES_PER_USER} profiles used.
             </p>
 
-            <Button
-              onClick={() => logout()}
-              variant="ghost"
-              className="w-full"
-            >
-              <LogOut className="w-4 h-4 mr-2" />
-              Sign Out
-            </Button>
+            <div className="space-y-2">
+              <Button
+                onClick={() => navigate("/linkedin-guide")}
+                variant="outline"
+                className="w-full border-accent/20 hover:bg-accent/5 text-accent"
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                LinkedIn Content Guide
+              </Button>
+              <Button
+                onClick={() => logout()}
+                variant="ghost"
+                className="w-full text-muted-foreground"
+              >
+                <LogOut className="w-4 h-4 mr-2" />
+                Sign Out
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
